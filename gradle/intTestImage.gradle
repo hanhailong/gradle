@@ -14,12 +14,13 @@
  * limitations under the License.
  */
 
-evaluationDependsOn ":distributions"
-evaluationDependsOn ":docs"
-
 task intTestImage(type: Sync) {
     group = "Verification"
     into file("$buildDir/integ test")
+}
+
+distributionTestTasks.all {
+    dependsOn intTestImage
 }
 
 if (useAllDistribution) {
@@ -38,13 +39,48 @@ if (useAllDistribution) {
         from(unpackedPath)
     }
 } else {
-    intTestImage {
-        with project(":distributions").binDistImage
-        into "samples", {
-            from { project(":docs").outputs.samples }
+    configurations { selfRuntime }
+
+    afterEvaluate {
+        if (project.tasks.findByName("jar")) {
+            dependencies { selfRuntime project }
         }
-        doLast { task ->
-            ant.chmod(dir: "$destinationDir/bin", perm: "ugo+rx", includes: "**/*")
+
+        intTestImage {
+            into('bin') {
+                from { project(':launcher').startScripts.outputs.files }
+                fileMode = 0755
+            }
+
+            def runtimeClasspathConfigurations = (rootProject.configurations.coreRuntime
+                    + rootProject.configurations.coreRuntimeExtensions
+                    + project.configurations.selfRuntime)
+            if (project.configurations.findByName('integTestRuntime')) {
+                runtimeClasspathConfigurations += project.configurations.integTestRuntimeClasspath
+            }
+            if (project.configurations.findByName('crossVersionTestRuntime')) {
+                runtimeClasspathConfigurations += project.configurations.crossVersionTestRuntimeClasspath
+            }
+            if (project.configurations.findByName('smokeTestRuntime')) {
+                runtimeClasspathConfigurations += project.configurations.smokeTestRuntimeClasspath
+            }
+            if (project.configurations.findByName('performanceTestRuntime')) {
+                runtimeClasspathConfigurations += project.configurations.performanceTestRuntimeClasspath
+            }
+            def libsNotInRuntimeClasspath = (rootProject.configurations.runtime + rootProject.configurations.gradlePlugins) - runtimeClasspathConfigurations
+
+            into 'lib', {
+                from rootProject.configurations.runtime - libsNotInRuntimeClasspath
+                into('plugins') {
+                    from rootProject.configurations.gradlePlugins - rootProject.configurations.runtime - libsNotInRuntimeClasspath
+                }
+            }
+            into 'samples', {
+                from { project(":docs").outputs.samples }
+            }
+            doLast {
+                ant.chmod(dir: "$destinationDir/bin", perm: "ugo+rx", includes: "**/*")
+            }
         }
     }
 }
